@@ -45,8 +45,7 @@ function finalizer(@nospecialize(f), @nospecialize(o))
     if !ismutable(o)
         error("objects of type ", typeof(o), " cannot be finalized")
     end
-    ccall(:jl_gc_add_finalizer_th, Cvoid, (Ptr{Cvoid}, Any, Any),
-          Core.getptls(), o, f)
+    Core._add_finalizer(o, f)
     return o
 end
 
