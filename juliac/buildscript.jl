@@ -63,6 +63,87 @@ end
     @inline function invokelatest(f::F, args...; kwargs...) where F
         return f(args...; kwargs...)
     end
+    @inline function write(io::IO, x1, xs...)
+        written::Int = write(io, x1)
+        for x in xs
+            written += write(io, x)
+        end
+        return written
+    end
+    @inline function open(f::Function, args...; kwargs...)
+        io = open(args...; kwargs...)
+        try
+            f(io)
+        finally
+            close(io)
+        end
+    end
+    @inline function with_output_color(f::F, color::Union{Int,Symbol}, io::IO, args...;
+        bold::Bool=false, italic::Bool=false, underline::Bool=false, blink::Bool=false,
+        reverse::Bool=false, hidden::Bool=false) where {F<:Function}
+        buf = IOBuffer()
+        iscolor = get(io, :color, false)::Bool
+        try
+            @inline f(IOContext(buf, io), args...)
+        finally
+            str = String(take!(buf))
+            if !iscolor
+                print(io, str)
+            else
+                bold && color === :bold && (color = :nothing)
+                italic && color === :italic && (color = :nothing)
+                underline && color === :underline && (color = :nothing)
+                blink && color === :blink && (color = :nothing)
+                reverse && color === :reverse && (color = :nothing)
+                hidden && color === :hidden && (color = :nothing)
+                enable_ansi = get(text_colors, color, text_colors[:default]) *
+                              (bold ? text_colors[:bold] : "") *
+                              (italic ? text_colors[:italic] : "") *
+                              (underline ? text_colors[:underline] : "") *
+                              (blink ? text_colors[:blink] : "") *
+                              (reverse ? text_colors[:reverse] : "") *
+                              (hidden ? text_colors[:hidden] : "")
+
+                disable_ansi = (hidden ? disable_text_style[:hidden] : "") *
+                               (reverse ? disable_text_style[:reverse] : "") *
+                               (blink ? disable_text_style[:blink] : "") *
+                               (underline ? disable_text_style[:underline] : "") *
+                               (bold ? disable_text_style[:bold] : "") *
+                               (italic ? disable_text_style[:italic] : "") *
+                               get(disable_text_style, color, text_colors[:default])
+                first = true
+                for line in eachsplit(str, '\n')
+                    first || print(buf, '\n')
+                    first = false
+                    isempty(line) && continue
+                    print(buf, enable_ansi, line, disable_ansi)
+                end
+                print(io, String(take!(buf)))
+            end
+        end
+    end
+    function kwerr(kw, args::Vararg{Any,N}) where {N}
+        @noinline
+        @nospecialize
+        throw(MethodError(Core.kwcall, (kw, args...), tls_world_age()))
+    end
+
+    # for m in methods(printstyled)
+    #     Base.delete_method(m)
+    # end
+    # @constprop :none @inline printstyled(io::IO, msg...; bold::Bool=false, italic::Bool=false, underline::Bool=false, blink::Bool=false, reverse::Bool=false, hidden::Bool=false, color::Union{Int,Symbol}=:normal) =
+    #     @inline with_output_color(print, color, io, msg...; bold=bold, italic=italic, underline=underline, blink=blink, reverse=reverse, hidden=hidden)
+    # @constprop :none @inline printstyled(msg...; bold::Bool=false, italic::Bool=false, underline::Bool=false, blink::Bool=false, reverse::Bool=false, hidden::Bool=false, color::Union{Int,Symbol}=:normal) =
+    #     @inline printstyled(stdout, msg...; bold=bold, italic=italic, underline=underline, blink=blink, reverse=reverse, hidden=hidden, color=color)
+    # @show methods(printstyled)
+
+    function setproperty!(x, f::Symbol, v)
+        @inline
+        ty = fieldtype(typeof(x), f)
+        val = v isa ty ? v : convert(ty, v)
+        return setfield!(x, f, val)
+    end
+
     # nothrow needed here because for v in a can't prove the indexing is inbounds.
 
     function sprint(f::F, args::Vararg{Any,N}; context=nothing, sizehint::Integer=0) where {F<:Function,N}
